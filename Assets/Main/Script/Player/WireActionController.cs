@@ -1,4 +1,3 @@
-
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -56,8 +55,11 @@ public class WireActionController : MonoBehaviour
 
 
     [Header("空中移動設定")]
-    [SerializeField] private float airMoveAcceleration = 5f;
-    [SerializeField] private float airMoveMaxSpeed = 3f;
+    [Tooltip("空中での加速度(m/s?)。大きいほど空中で動きやすい")]
+    [SerializeField] private float airMoveAcceleration = 15f;
+
+    [Tooltip("空中で入力方向に出せる速度。これを超える速度は削られない")]
+    [SerializeField] private float airMoveMaxSpeed = 7f;
 
     // =====================================================
     // ダッシュ&ジャンプ設定
@@ -88,8 +90,17 @@ public class WireActionController : MonoBehaviour
     [Tooltip("接続地点へ引き寄せる加速度")]
     [SerializeField] private float pullAcceleration = 12f;
 
-    [Tooltip("ワイヤーによる引き寄せの最大速度")]
+    [Tooltip("引き寄せ方向の速度がこの値を超えている間は、追加の引き寄せを行わない(速度を削ることはしない)。0以下なら制限なし")]
     [SerializeField] private float maxPullSpeed = 25f;
+
+    [Tooltip("ロープの最短長さ。これより近づくと引き寄せを止め、振り子のように振れる")]
+    [SerializeField] private float minRopeLength = 2f;
+
+    [Tooltip("接続地点にどれだけ近づくと引き寄せが弱まり始めるか(オーバーシュート防止)")]
+    [SerializeField] private float pullFalloffDistance = 5f;
+
+    [Tooltip("目標速度を超えて地上を移動しているときの減速度(小さいほど勢いが残る)")]
+    [SerializeField] private float groundOverspeedDeceleration = 4f;
 
 
     [Header("ワイヤー解除後の慣性")]
@@ -130,6 +141,14 @@ public class WireActionController : MonoBehaviour
     [SerializeField] private ParticleSystem gasEffect;
 
     // =====================================================
+    // チェックポイント設定
+    // =====================================================
+
+    [Header("チェックポイント設定")]
+    [Tooltip("復帰時にガスを全回復する")]
+    [SerializeField] private bool refillGasOnRespawn = true;
+
+    // =====================================================
     // 内部データ
     // =====================================================
 
@@ -158,6 +177,13 @@ public class WireActionController : MonoBehaviour
 
     private float currentGas;
 
+    // 現在のロープの長さ(接続時の距離。縮む一方で伸びない)
+    private float ropeLength;
+
+    // 復帰地点(最初は開始位置)
+    private Vector3 respawnPosition;
+    private Quaternion respawnRotation;
+
     // =====================================================
     // 初期化
     // =====================================================
@@ -183,6 +209,10 @@ public class WireActionController : MonoBehaviour
         maxGas = Mathf.Max(0f, maxGas);
         startingGas = Mathf.Clamp(startingGas, 0f, maxGas);
         currentGas = startingGas;
+
+        // 最初のチェックポイントは開始位置
+        respawnPosition = transform.position;
+        respawnRotation = transform.rotation;
 
         if (gasEffect != null)
         {
@@ -432,6 +462,12 @@ public class WireActionController : MonoBehaviour
         {
             wireTipPosition = wireTargetPoint;
             wireState = WireState.Attached;
+
+            // 接続した瞬間の距離をロープの長さにする
+            ropeLength = Mathf.Max(
+                Vector3.Distance(rb.position, wireTargetPoint),
+                minRopeLength
+            );
         }
     }
 
@@ -512,7 +548,8 @@ public class WireActionController : MonoBehaviour
             moveDirection.sqrMagnitude > 0.01f;
 
         // 地面判定
-        bool grounded = CheckGrounded();
+        // ワイヤー接続中は地上の減速処理を使わない(勢いを保つ)
+        bool grounded = CheckGrounded() && !HasAttachedWire;
 
         Vector3 velocity = rb.linearVelocity;
         Vector3 horizontalVelocity = new Vector3(
@@ -568,46 +605,24 @@ public class WireActionController : MonoBehaviour
         // =====================================================
         if (!grounded)
         {
-            // 空中では通常のWASDダッシュを適用しない。
-            // すでに速く移動している場合は速度の大きさを保ち、
-            // 空中移動入力では進行方向だけをゆっくり変える。
-            float currentSpeed = horizontalVelocity.magnitude;
+            // 空中操作は「入力方向への加速を足すだけ」にする。
+            // 速度を削ったり向きを無理に変えたりしないので、
+            // ワイヤーで付いた勢いや振り子の動きを壊さない。
+            Vector3 inputDirection = moveDirection.normalized;
 
-            if (currentSpeed > airMoveMaxSpeed && currentSpeed > 0.01f)
+            float speedAlongInput =
+                Vector3.Dot(horizontalVelocity, inputDirection);
+
+            // 入力方向の速度が airMoveMaxSpeed 未満のときだけ加速する
+            if (speedAlongInput < airMoveMaxSpeed)
             {
-                Vector3 currentDirection =
-                    horizontalVelocity.normalized;
-
-                Vector3 steeredDirection = Vector3.RotateTowards(
-                    currentDirection,
-                    moveDirection.normalized,
+                float addSpeed = Mathf.Min(
                     airMoveAcceleration * Time.fixedDeltaTime,
-                    0f
-                ).normalized;
-
-                Vector3 steeredVelocity =
-                    steeredDirection * currentSpeed;
-
-                rb.AddForce(
-                    steeredVelocity - horizontalVelocity,
-                    ForceMode.VelocityChange
-                );
-            }
-            else
-            {
-                // 空中で速度が低いときだけ、弱い加速で操作する。
-                // 速度を強制的に切り詰めないため、ワイヤー由来の慣性を壊さない。
-                Vector3 targetVelocity =
-                    moveDirection.normalized * airMoveMaxSpeed;
-
-                Vector3 nextVelocity = Vector3.MoveTowards(
-                    horizontalVelocity,
-                    targetVelocity,
-                    airMoveAcceleration * Time.fixedDeltaTime
+                    airMoveMaxSpeed - speedAlongInput
                 );
 
                 rb.AddForce(
-                    nextVelocity - horizontalVelocity,
+                    inputDirection * addSpeed,
                     ForceMode.VelocityChange
                 );
             }
@@ -628,6 +643,15 @@ public class WireActionController : MonoBehaviour
         float acceleration = isDashing
             ? dashAcceleration
             : moveAcceleration;
+
+        // 目標速度を超えているときは急ブレーキをかけず、ゆるやかに減速する
+        if (horizontalVelocity.magnitude > targetSpeed)
+        {
+            acceleration = Mathf.Min(
+                acceleration,
+                groundOverspeedDeceleration
+            );
+        }
 
         Vector3 targetGroundVelocity =
             moveDirection * targetSpeed;
@@ -671,39 +695,64 @@ public class WireActionController : MonoBehaviour
 
     private void ApplyWirePull()
     {
-        Vector3 direction =
-            wireTargetPoint - transform.position;
+        Vector3 toAnchor = wireTargetPoint - rb.position;
+        float distance = toAnchor.magnitude;
 
-        if (direction.sqrMagnitude < 0.01f)
+        if (distance < 0.01f)
         {
             return;
         }
 
-        direction.Normalize();
+        Vector3 dirToAnchor = toAnchor / distance;
 
-        rb.AddForce(
-            direction * pullAcceleration,
-            ForceMode.Acceleration
-        );
+        // -------------------------------------------------
+        // 1. 引き寄せ(リール)
+        //    速度を削らず、足りないときだけ加速する。
+        //    接続地点に近づくほど弱めて、通り過ぎて戻される動きを防ぐ。
+        // -------------------------------------------------
+        float inwardSpeed =
+            Vector3.Dot(rb.linearVelocity, dirToAnchor);
 
-        // 引き寄せ方向の速度が上限を超えないようにする
-        if (maxPullSpeed > 0f)
+        bool underSpeedLimit =
+            maxPullSpeed <= 0f || inwardSpeed < maxPullSpeed;
+
+        if (distance > minRopeLength && underSpeedLimit)
         {
-            Vector3 toTarget =
-                wireTargetPoint - transform.position;
+            float falloff = Mathf.Clamp01(
+                (distance - minRopeLength) /
+                Mathf.Max(0.01f, pullFalloffDistance)
+            );
 
+            rb.AddForce(
+                dirToAnchor * pullAcceleration * falloff,
+                ForceMode.Acceleration
+            );
+        }
+
+        // -------------------------------------------------
+        // 2. ロープの拘束
+        //    ロープより外へ出ようとする速度成分だけを消す。
+        //    横方向(接線)の速度は残るので、振り子のように勢いが続く。
+        // -------------------------------------------------
+        if (distance > ropeLength)
+        {
+            Vector3 outward = -dirToAnchor;
             Vector3 velocity = rb.linearVelocity;
 
-            float towardTargetSpeed =
-                Vector3.Dot(velocity, toTarget.normalized);
+            float outwardSpeed = Vector3.Dot(velocity, outward);
 
-            if (towardTargetSpeed > maxPullSpeed)
+            if (outwardSpeed > 0f)
             {
-                rb.linearVelocity =
-                    velocity -
-                    toTarget.normalized *
-                    (towardTargetSpeed - maxPullSpeed);
+                rb.linearVelocity = velocity - outward * outwardSpeed;
             }
+
+            // ロープの長さまで位置を戻す
+            rb.position += dirToAnchor * (distance - ropeLength);
+        }
+        else
+        {
+            // ロープは縮む一方で伸びない
+            ropeLength = Mathf.Max(distance, minRopeLength);
         }
     }
 
@@ -766,22 +815,18 @@ public class WireActionController : MonoBehaviour
         // カメラが向いている方向を取得
         Vector3 boostDirection = playerCamera.transform.forward.normalized;
 
-        // カメラの上下方向も含めてガス噴射する
-        rb.AddForce(
-            boostDirection * gasBoostForce,
-            ForceMode.Acceleration
-        );
+        // 噴射方向の速度が上限未満のときだけ加速する。
+        // 上限を超えていても速度は削らない(急な減速を防ぐ)。
+        float speedAlongBoost =
+            Vector3.Dot(rb.linearVelocity, boostDirection);
 
-        // ガス噴射中の速度を制限
-        if (maxGasBoostSpeed > 0f)
+        if (maxGasBoostSpeed <= 0f || speedAlongBoost < maxGasBoostSpeed)
         {
-            Vector3 velocity = rb.linearVelocity;
-
-            if (velocity.magnitude > maxGasBoostSpeed)
-            {
-                rb.linearVelocity =
-                    velocity.normalized * maxGasBoostSpeed;
-            }
+            // カメラの上下方向も含めてガス噴射する
+            rb.AddForce(
+                boostDirection * gasBoostForce,
+                ForceMode.Acceleration
+            );
         }
     }
 
@@ -818,6 +863,50 @@ public class WireActionController : MonoBehaviour
 
         wireLine.SetPosition(0, GetWireStartPosition());
         wireLine.SetPosition(1, wireTipPosition);
+    }
+
+    // =====================================================
+    // チェックポイント・復帰
+    // =====================================================
+
+    /// <summary>
+    /// 復帰地点を更新する(Checkpointから呼ばれる)
+    /// </summary>
+    public void SetCheckpoint(Vector3 position, Quaternion rotation)
+    {
+        respawnPosition = position;
+        respawnRotation = rotation;
+    }
+
+    /// <summary>
+    /// 最後に通ったチェックポイントへ戻る(RespawnGroundから呼ばれる)
+    /// </summary>
+    public void Respawn()
+    {
+        // ワイヤーを即座に解除
+        wireState = WireState.Idle;
+
+        if (wireLine != null)
+        {
+            wireLine.enabled = false;
+        }
+
+        // ガス噴射を停止
+        isGasBoosting = false;
+        StopGasEffect();
+
+        // 速度をリセットして移動
+        rb.linearVelocity = Vector3.zero;
+        rb.angularVelocity = Vector3.zero;
+        rb.position = respawnPosition;
+        rb.rotation = respawnRotation;
+        transform.SetPositionAndRotation(respawnPosition, respawnRotation);
+        Physics.SyncTransforms();
+
+        if (refillGasOnRespawn)
+        {
+            currentGas = maxGas;
+        }
     }
 
     // =====================================================
