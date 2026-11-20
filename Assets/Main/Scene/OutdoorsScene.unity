@@ -1190,7 +1190,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bc2ab611a39082d4f9334e0ee676f621, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::WireActionController
-  playerCamera: {fileID: 1823688466}
+  playerCamera: {fileID: 0}
   wireOrigin: {fileID: 1812403444}
   wireLine: {fileID: 1812403443}
   maxWireDistance: 50
@@ -1203,8 +1203,6 @@ MonoBehaviour:
   moveSpeed: 20
   moveAcceleration: 25
   moveDeceleration: 15
-  faceMoveDirection: 1
-  rotationSpeed: 12
   airMoveAcceleration: 5
   airMoveMaxSpeed: 10
   dashSpeed: 18
@@ -1239,7 +1237,7 @@ Transform:
   m_GameObject: {fileID: 46220074}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 524.6, y: 5.2, z: -66.6}
+  m_LocalPosition: {x: -72.3, y: 5.2, z: -66.6}
   m_LocalScale: {x: 1, y: 2, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -1838,7 +1836,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: -0.58, y: 0, z: -63.4}
-  m_LocalScale: {x: 10000, y: 1, z: 10000}
+  m_LocalScale: {x: 100000, y: 1, z: 100000}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 742061509}
@@ -22604,13 +22602,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1823688464}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.028157426, y: -0.6850694, z: -0.026521036, w: -0.72745013}
-  m_LocalPosition: {x: 0.14011002, y: 1.1370001, z: 0.06098938}
+  m_LocalRotation: {x: -0.064073466, y: -0.026993595, z: -0.0017337713, w: 0.99757856}
+  m_LocalPosition: {x: -70.4, y: 7.4, z: -154.1}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: -25.22, z: 0}
+  m_LocalEulerAnglesHint: {x: -7.35, y: -3.1, z: 0}
 --- !u!114 &1823688468
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -22762,14 +22760,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a724e31e8fac42543b0530104477d932, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ThirdPersonCameraController
-  player: {fileID: 617125697}
-  cameraTarget: {fileID: 1691235547}
-  startInFirstPerson: 1
-  thirdPersonDistance: 5
-  thirdPersonHeight: 0.5
-  mouseSensitivity: 0.15
-  minPitch: -35
-  maxPitch: 70
+  target: {fileID: 46220080}
+  offset: {x: 0, y: 1, z: -10}
   followSpeed: 15
 --- !u!1 &1834046354
 GameObject:
@@ -25464,8 +25456,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 441482e8936e35048a1dffac814e3ef8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_Profile: {fileID: 11400000, guid: 8ba92e2dd7f884a0f88b98fa2d235fe7, type: 2}
-  m_StaticLightingSkyUniqueID: 4
+  m_Profile: {fileID: 0}
+  m_StaticLightingSkyUniqueID: 0
   m_StaticLightingCloudsUniqueID: 0
   m_StaticLightingVolumetricClouds: 0
   bounces: 1
@@ -26810,7 +26802,7 @@ Transform:
   m_GameObject: {fileID: 2142200262}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 16.1, y: 17.1, z: -15.9}
+  m_LocalPosition: {x: 16.1, y: 100, z: -15.9}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:

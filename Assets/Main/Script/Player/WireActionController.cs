@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-[RequireComponent(typeof(Rigidbody))]
+[RequireComponent(typeof(Rigidbody2D))]
 public class WireActionController : MonoBehaviour
 {
     // =====================================================
@@ -9,7 +9,7 @@ public class WireActionController : MonoBehaviour
     // =====================================================
 
     [Header("カメラ・ワイヤー設定")]
-    [Tooltip("照準方向を取得するカメラ")]
+    [Tooltip("マウス位置をワールド座標に変換するカメラ(Orthographic)")]
     [SerializeField] private Camera playerCamera;
 
     [Tooltip("ワイヤーの始点。未設定ならPlayerの位置を使う")]
@@ -34,10 +34,10 @@ public class WireActionController : MonoBehaviour
     [SerializeField] private LayerMask wireTargetLayers = ~0;
 
     // =====================================================
-    // WASD移動設定
+    // 移動設定
     // =====================================================
 
-    [Header("WASD移動設定")]
+    [Header("移動設定")]
     [Tooltip("通常移動速度")]
     [SerializeField] private float moveSpeed = 6f;
 
@@ -47,15 +47,8 @@ public class WireActionController : MonoBehaviour
     [Tooltip("入力がないときの減速")]
     [SerializeField] private float moveDeceleration = 15f;
 
-    [Tooltip("移動方向にPlayerを向ける")]
-    [SerializeField] private bool faceMoveDirection = true;
-
-    [Tooltip("向きを変更する速度")]
-    [SerializeField] private float rotationSpeed = 12f;
-
-
     [Header("空中移動設定")]
-    [Tooltip("空中での加速度(m/s?)。大きいほど空中で動きやすい")]
+    [Tooltip("空中での加速度。大きいほど空中で動きやすい")]
     [SerializeField] private float airMoveAcceleration = 15f;
 
     [Tooltip("空中で入力方向に出せる速度。これを超える速度は削られない")]
@@ -66,7 +59,7 @@ public class WireActionController : MonoBehaviour
     // =====================================================
 
     [Header("ダッシュ設定")]
-    [Tooltip("Ctrl + Wでダッシュする速度")]
+    [Tooltip("Ctrl + A/Dでダッシュする速度")]
     [SerializeField] private float dashSpeed = 18f;
 
     [Tooltip("ダッシュ時の加速度")]
@@ -80,8 +73,6 @@ public class WireActionController : MonoBehaviour
     [SerializeField] private float groundCheckDistance = 0.2f;
     [SerializeField] private LayerMask groundLayers = ~0;
 
-    private bool isGrounded;
-
     // =====================================================
     // ワイヤー引き寄せ設定
     // =====================================================
@@ -90,35 +81,30 @@ public class WireActionController : MonoBehaviour
     [Tooltip("接続地点へ引き寄せる加速度")]
     [SerializeField] private float pullAcceleration = 12f;
 
-    [Tooltip("引き寄せ方向の速度がこの値を超えている間は、追加の引き寄せを行わない(速度を削ることはしない)。0以下なら制限なし")]
+    [Tooltip("引き寄せ方向の速度がこの値を超えている間は、追加の引き寄せを行わない。0以下なら制限なし")]
     [SerializeField] private float maxPullSpeed = 25f;
 
     [Tooltip("ロープの最短長さ。これより近づくと引き寄せを止め、振り子のように振れる")]
     [SerializeField] private float minRopeLength = 2f;
 
-    [Tooltip("接続地点にどれだけ近づくと引き寄せが弱まり始めるか(オーバーシュート防止)")]
+    [Tooltip("接続地点にどれだけ近づくと引き寄せが弱まり始めるか")]
     [SerializeField] private float pullFalloffDistance = 5f;
 
     [Tooltip("目標速度を超えて地上を移動しているときの減速度(小さいほど勢いが残る)")]
     [SerializeField] private float groundOverspeedDeceleration = 4f;
 
-
     [Header("ワイヤー解除後の慣性")]
     [SerializeField] private float wireReleaseDeceleration = 0.5f;
-
 
     // =====================================================
     // ガス設定
     // =====================================================
 
     [Header("ガス設定")]
-    [Tooltip("ガスの最大量")]
     [SerializeField] private float maxGas = 100f;
-
-    [Tooltip("開始時のガス量")]
     [SerializeField] private float startingGas = 100f;
 
-    [Tooltip("ガス噴射中の加速力")]
+    [Tooltip("ガス噴射中の加速度")]
     [SerializeField] private float gasBoostForce = 30f;
 
     [Tooltip("1秒あたりのガス消費量")]
@@ -127,15 +113,11 @@ public class WireActionController : MonoBehaviour
     [Tooltip("ガスを使用していないときの回復量/秒")]
     [SerializeField] private float gasRecoveryRate = 10f;
 
-    [Tooltip("ガス噴射中の最大水平速度。0以下なら制限なし")]
+    [Tooltip("噴射方向の最大速度。0以下なら制限なし")]
     [SerializeField] private float maxGasBoostSpeed = 35f;
 
     [Tooltip("ガス噴射をワイヤー接続中だけ許可する")]
     [SerializeField] private bool gasRequiresAttachedWire = true;
-
-    // =====================================================
-    // ガスエフェクト
-    // =====================================================
 
     [Header("ガスエフェクト")]
     [SerializeField] private ParticleSystem gasEffect;
@@ -152,7 +134,8 @@ public class WireActionController : MonoBehaviour
     // 内部データ
     // =====================================================
 
-    private Rigidbody rb;
+    private Rigidbody2D rb;
+    private Collider2D playerCollider;
 
     private enum WireState
     {
@@ -164,25 +147,28 @@ public class WireActionController : MonoBehaviour
 
     private WireState wireState = WireState.Idle;
 
-    private Vector3 wireTargetPoint;
-    private Vector3 wireTipPosition;
-    private Vector3 moveDirection;
+    private Vector2 wireTargetPoint;
+    private Vector2 wireTipPosition;
+
+    // 左右入力(-1, 0, 1)
+    private float moveInput;
 
     private bool gasInputHeld;
     private bool isGasBoosting;
     private bool dashInputHeld;
 
-    private bool HasAttachedWire =>
-        wireState == WireState.Attached;
+    private bool HasAttachedWire => wireState == WireState.Attached;
 
     private float currentGas;
-
-    // 現在のロープの長さ(接続時の距離。縮む一方で伸びない)
     private float ropeLength;
 
-    // 復帰地点(最初は開始位置)
-    private Vector3 respawnPosition;
-    private Quaternion respawnRotation;
+    private Vector2 respawnPosition;
+    private float respawnRotationZ;
+
+    // 地面判定・ワイヤー判定用バッファ
+    private readonly RaycastHit2D[] hitBuffer = new RaycastHit2D[16];
+    private ContactFilter2D groundFilter;
+    private ContactFilter2D wireFilter;
 
     // =====================================================
     // 初期化
@@ -190,7 +176,8 @@ public class WireActionController : MonoBehaviour
 
     private void Awake()
     {
-        rb = GetComponent<Rigidbody>();
+        rb = GetComponent<Rigidbody2D>();
+        playerCollider = GetComponent<Collider2D>();
 
         if (playerCamera == null)
         {
@@ -210,9 +197,16 @@ public class WireActionController : MonoBehaviour
         startingGas = Mathf.Clamp(startingGas, 0f, maxGas);
         currentGas = startingGas;
 
-        // 最初のチェックポイントは開始位置
-        respawnPosition = transform.position;
-        respawnRotation = transform.rotation;
+        respawnPosition = rb.position;
+        respawnRotationZ = rb.rotation;
+
+        groundFilter = new ContactFilter2D();
+        groundFilter.SetLayerMask(groundLayers);
+        groundFilter.useTriggers = false;
+
+        wireFilter = new ContactFilter2D();
+        wireFilter.SetLayerMask(wireTargetLayers);
+        wireFilter.useTriggers = false;
 
         if (gasEffect != null)
         {
@@ -236,17 +230,20 @@ public class WireActionController : MonoBehaviour
         {
             gasInputHeld = false;
             dashInputHeld = false;
+            moveInput = 0f;
             return;
         }
 
-        // WASD移動入力
-        ReadMovementInput(keyboard);
+        // A/D移動入力
+        moveInput = 0f;
+        if (keyboard.aKey.isPressed) moveInput -= 1f;
+        if (keyboard.dKey.isPressed) moveInput += 1f;
 
-        // Ctrl + Wでダッシュ
+        // Ctrl + A/Dでダッシュ
         dashInputHeld =
             (keyboard.leftCtrlKey.isPressed ||
              keyboard.rightCtrlKey.isPressed) &&
-            keyboard.wKey.isPressed;
+            moveInput != 0f;
 
         // Shiftでガス噴射
         gasInputHeld =
@@ -267,75 +264,35 @@ public class WireActionController : MonoBehaviour
             StartRetracting();
         }
 
-        // =====================================================
-        // ジャンプ入力
-        // =====================================================
-        if (keyboard != null && keyboard.spaceKey.wasPressedThisFrame)
+        // ジャンプ
+        if (keyboard.spaceKey.wasPressedThisFrame && CheckGrounded())
         {
-            if (CheckGrounded())
-            {
-                Jump();
-            }
+            Jump();
         }
 
-        // ワイヤーの状態を更新
         UpdateWire();
-
-        // ガスの消費・回復
         UpdateGas();
-
-        // ワイヤー描画
         UpdateWireLine();
     }
 
     // =====================================================
-    // WASD入力をカメラ基準の方向に変換
+    // 照準(マウス位置をワールド座標に変換)
     // =====================================================
 
-
-    private void ReadMovementInput(Keyboard keyboard)
+    private bool TryGetMouseWorldPoint(out Vector2 worldPoint)
     {
-        float horizontal = 0f;
-        float vertical = 0f;
+        worldPoint = Vector2.zero;
 
-        if (keyboard.aKey.isPressed) horizontal -= 1f;
-        if (keyboard.dKey.isPressed) horizontal += 1f;
-        if (keyboard.sKey.isPressed) vertical -= 1f;
-        if (keyboard.wKey.isPressed) vertical += 1f;
-
-        // カメラが向いている方向を基準に移動する
-        Vector3 forward;
-        Vector3 right;
-
-        if (playerCamera != null)
+        if (playerCamera == null || Mouse.current == null)
         {
-            forward = playerCamera.transform.forward;
-            right = playerCamera.transform.right;
-        }
-        else
-        {
-            forward = transform.forward;
-            right = transform.right;
+            return false;
         }
 
-        // 上下方向の視点角度を移動方向に反映させない
-        forward.y = 0f;
-        right.y = 0f;
+        Vector3 screen = Mouse.current.position.ReadValue();
+        screen.z = Mathf.Abs(playerCamera.transform.position.z);
 
-        forward.Normalize();
-        right.Normalize();
-
-        // Wで前進、Sで後退、A/Dで左右移動
-        moveDirection =
-            forward * vertical +
-            right * horizontal;
-
-        // 斜め移動の速度を一定にする
-        moveDirection = Vector3.ClampMagnitude(
-            moveDirection, 1f
-        );
-
-        // Playerの回転処理は行わない
+        worldPoint = playerCamera.ScreenToWorldPoint(screen);
+        return true;
     }
 
     // =====================================================
@@ -344,7 +301,7 @@ public class WireActionController : MonoBehaviour
 
     private void ShootWire()
     {
-        if (playerCamera == null)
+        if (!TryGetMouseWorldPoint(out Vector2 mouseWorld))
         {
             Debug.LogWarning(
                 "WireActionController: Player Cameraが未設定です。"
@@ -352,36 +309,44 @@ public class WireActionController : MonoBehaviour
             return;
         }
 
-        Ray ray = playerCamera.ViewportPointToRay(
-            new Vector3(0.5f, 0.5f, 0f)
-        );
+        Vector2 origin = GetWireStartPosition();
+        Vector2 direction = mouseWorld - origin;
 
-        // 自分自身のColliderを避けて接続先を検索
-        RaycastHit[] hits = Physics.RaycastAll(
-            ray,
-            maxWireDistance,
-            wireTargetLayers,
-            QueryTriggerInteraction.Ignore
-        );
+        if (direction.sqrMagnitude < 0.0001f)
+        {
+            return;
+        }
 
-        System.Array.Sort(
-            hits,
-            (a, b) => a.distance.CompareTo(b.distance)
+        direction.Normalize();
+
+        int count = Physics2D.Raycast(
+            origin,
+            direction,
+            wireFilter,
+            hitBuffer,
+            maxWireDistance
         );
 
         bool foundTarget = false;
+        float nearest = float.MaxValue;
 
-        foreach (RaycastHit hit in hits)
+        for (int i = 0; i < count; i++)
         {
+            RaycastHit2D hit = hitBuffer[i];
+
+            // 自分自身のColliderは無視
             if (hit.collider.transform.IsChildOf(transform) ||
                 hit.collider.transform == transform)
             {
                 continue;
             }
 
-            wireTargetPoint = hit.point;
-            foundTarget = true;
-            break;
+            if (hit.distance < nearest)
+            {
+                nearest = hit.distance;
+                wireTargetPoint = hit.point;
+                foundTarget = true;
+            }
         }
 
         if (!foundTarget)
@@ -390,7 +355,7 @@ public class WireActionController : MonoBehaviour
             return;
         }
 
-        wireTipPosition = GetWireStartPosition();
+        wireTipPosition = origin;
         wireState = WireState.Extending;
 
         if (wireLine != null)
@@ -403,7 +368,7 @@ public class WireActionController : MonoBehaviour
     // ワイヤー始点
     // =====================================================
 
-    private Vector3 GetWireStartPosition()
+    private Vector2 GetWireStartPosition()
     {
         if (wireOrigin != null)
         {
@@ -438,10 +403,6 @@ public class WireActionController : MonoBehaviour
         }
     }
 
-    // =====================================================
-    // ワイヤー射出アニメーション
-    // =====================================================
-
     private void UpdateWireExtending()
     {
         if (Mouse.current == null ||
@@ -451,29 +412,24 @@ public class WireActionController : MonoBehaviour
             return;
         }
 
-        wireTipPosition = Vector3.MoveTowards(
+        wireTipPosition = Vector2.MoveTowards(
             wireTipPosition,
             wireTargetPoint,
             wireExtendSpeed * Time.deltaTime
         );
 
-        if (Vector3.Distance(
-            wireTipPosition, wireTargetPoint) < 0.02f)
+        if (Vector2.Distance(wireTipPosition, wireTargetPoint) < 0.02f)
         {
             wireTipPosition = wireTargetPoint;
             wireState = WireState.Attached;
 
             // 接続した瞬間の距離をロープの長さにする
             ropeLength = Mathf.Max(
-                Vector3.Distance(rb.position, wireTargetPoint),
+                Vector2.Distance(rb.position, wireTargetPoint),
                 minRopeLength
             );
         }
     }
-
-    // =====================================================
-    // ワイヤー回収
-    // =====================================================
 
     private void StartRetracting()
     {
@@ -490,16 +446,17 @@ public class WireActionController : MonoBehaviour
 
     private void UpdateWireRetracting()
     {
-        wireTipPosition = Vector3.MoveTowards(
+        Vector2 start = GetWireStartPosition();
+
+        wireTipPosition = Vector2.MoveTowards(
             wireTipPosition,
-            GetWireStartPosition(),
+            start,
             wireRetractSpeed * Time.deltaTime
         );
 
-        if (Vector3.Distance(
-            wireTipPosition, GetWireStartPosition()) < 0.05f)
+        if (Vector2.Distance(wireTipPosition, start) < 0.05f)
         {
-            wireTipPosition = GetWireStartPosition();
+            wireTipPosition = start;
             wireState = WireState.Idle;
 
             if (wireLine != null)
@@ -520,45 +477,40 @@ public class WireActionController : MonoBehaviour
             return;
         }
 
-        // WASD移動とダッシュ
         ApplyMovement();
 
-        // ワイヤーによる引き寄せ
         if (HasAttachedWire)
         {
             ApplyWirePull();
         }
 
-        // ガス噴射
         if (isGasBoosting)
         {
             ApplyGasBoost();
         }
-
     }
 
     // =====================================================
     // 移動・ダッシュ処理
     // =====================================================
 
+    private void SetHorizontalVelocity(float x)
+    {
+        Vector2 v = rb.linearVelocity;
+        v.x = x;
+        rb.linearVelocity = v;
+    }
 
     private void ApplyMovement()
     {
-        bool hasMovement =
-            moveDirection.sqrMagnitude > 0.01f;
+        bool hasMovement = Mathf.Abs(moveInput) > 0.01f;
 
-        // 地面判定
         // ワイヤー接続中は地上の減速処理を使わない(勢いを保つ)
         bool grounded = CheckGrounded() && !HasAttachedWire;
 
-        Vector3 velocity = rb.linearVelocity;
-        Vector3 horizontalVelocity = new Vector3(
-            velocity.x, 0f, velocity.z
-        );
+        float vx = rb.linearVelocity.x;
 
-        // =====================================================
-        // 入力がないとき
-        // =====================================================
+        // ---------------- 入力がないとき ----------------
         if (!hasMovement)
         {
             // ワイヤー接続中やガス噴射中は慣性を維持
@@ -567,53 +519,23 @@ public class WireActionController : MonoBehaviour
                 return;
             }
 
-            if (grounded)
-            {
-                // 地上は今までどおり減速
-                Vector3 slowedVelocity = Vector3.MoveTowards(
-                    horizontalVelocity,
-                    Vector3.zero,
-                    moveDeceleration * Time.fixedDeltaTime
-                );
+            float decel = grounded
+                ? moveDeceleration
+                : wireReleaseDeceleration;
 
-                rb.AddForce(
-                    slowedVelocity - horizontalVelocity,
-                    ForceMode.VelocityChange
-                );
-            }
-            else
-            {
-                // 空中では弱い減速だけを行い、慣性を残す
-                // 速度を airMoveMaxSpeed で強制的に制限しない
-                Vector3 slowedVelocity = Vector3.MoveTowards(
-                    horizontalVelocity,
-                    Vector3.zero,
-                    wireReleaseDeceleration * Time.fixedDeltaTime
-                );
-
-                rb.AddForce(
-                    slowedVelocity - horizontalVelocity,
-                    ForceMode.VelocityChange
-                );
-            }
-
+            SetHorizontalVelocity(
+                Mathf.MoveTowards(vx, 0f, decel * Time.fixedDeltaTime)
+            );
             return;
         }
 
-        // =====================================================
-        // 空中移動
-        // =====================================================
+        // ---------------- 空中移動 ----------------
         if (!grounded)
         {
-            // 空中操作は「入力方向への加速を足すだけ」にする。
-            // 速度を削ったり向きを無理に変えたりしないので、
-            // ワイヤーで付いた勢いや振り子の動きを壊さない。
-            Vector3 inputDirection = moveDirection.normalized;
+            // 入力方向への加速を足すだけ。速度は削らない
+            float dir = Mathf.Sign(moveInput);
+            float speedAlongInput = vx * dir;
 
-            float speedAlongInput =
-                Vector3.Dot(horizontalVelocity, inputDirection);
-
-            // 入力方向の速度が airMoveMaxSpeed 未満のときだけ加速する
             if (speedAlongInput < airMoveMaxSpeed)
             {
                 float addSpeed = Mathf.Min(
@@ -621,31 +543,20 @@ public class WireActionController : MonoBehaviour
                     airMoveMaxSpeed - speedAlongInput
                 );
 
-                rb.AddForce(
-                    inputDirection * addSpeed,
-                    ForceMode.VelocityChange
-                );
+                SetHorizontalVelocity(vx + dir * addSpeed);
             }
 
             return;
         }
 
-        // =====================================================
-        // 地上移動・ダッシュ（従来どおり）
-        // =====================================================
-        bool isDashing =
-            dashInputHeld && moveDirection != Vector3.zero;
+        // ---------------- 地上移動・ダッシュ ----------------
+        bool isDashing = dashInputHeld;
 
-        float targetSpeed = isDashing
-            ? dashSpeed
-            : moveSpeed;
+        float targetSpeed = isDashing ? dashSpeed : moveSpeed;
+        float acceleration = isDashing ? dashAcceleration : moveAcceleration;
 
-        float acceleration = isDashing
-            ? dashAcceleration
-            : moveAcceleration;
-
-        // 目標速度を超えているときは急ブレーキをかけず、ゆるやかに減速する
-        if (horizontalVelocity.magnitude > targetSpeed)
+        // 目標速度を超えているときはゆるやかに減速
+        if (Mathf.Abs(vx) > targetSpeed)
         {
             acceleration = Mathf.Min(
                 acceleration,
@@ -653,40 +564,19 @@ public class WireActionController : MonoBehaviour
             );
         }
 
-        Vector3 targetGroundVelocity =
-            moveDirection * targetSpeed;
-
-        Vector3 nextGroundVelocity = Vector3.MoveTowards(
-            horizontalVelocity,
-            targetGroundVelocity,
+        float nextVx = Mathf.MoveTowards(
+            vx,
+            moveInput * targetSpeed,
             acceleration * Time.fixedDeltaTime
-        );
-
-        rb.AddForce(
-            nextGroundVelocity - horizontalVelocity,
-            ForceMode.VelocityChange
         );
 
         // 地上ダッシュ中の水平速度を制限
         if (isDashing && maxDashSpeed > 0f)
         {
-            Vector3 current = rb.linearVelocity;
-
-            Vector3 horizontal = new Vector3(
-                current.x, 0f, current.z
-            );
-
-            if (horizontal.magnitude > maxDashSpeed)
-            {
-                horizontal = horizontal.normalized * maxDashSpeed;
-
-                rb.linearVelocity = new Vector3(
-                    horizontal.x,
-                    current.y,
-                    horizontal.z
-                );
-            }
+            nextVx = Mathf.Clamp(nextVx, -maxDashSpeed, maxDashSpeed);
         }
+
+        SetHorizontalVelocity(nextVx);
     }
 
     // =====================================================
@@ -695,7 +585,7 @@ public class WireActionController : MonoBehaviour
 
     private void ApplyWirePull()
     {
-        Vector3 toAnchor = wireTargetPoint - rb.position;
+        Vector2 toAnchor = wireTargetPoint - rb.position;
         float distance = toAnchor.magnitude;
 
         if (distance < 0.01f)
@@ -703,15 +593,10 @@ public class WireActionController : MonoBehaviour
             return;
         }
 
-        Vector3 dirToAnchor = toAnchor / distance;
+        Vector2 dirToAnchor = toAnchor / distance;
 
-        // -------------------------------------------------
-        // 1. 引き寄せ(リール)
-        //    速度を削らず、足りないときだけ加速する。
-        //    接続地点に近づくほど弱めて、通り過ぎて戻される動きを防ぐ。
-        // -------------------------------------------------
-        float inwardSpeed =
-            Vector3.Dot(rb.linearVelocity, dirToAnchor);
+        // 1. 引き寄せ(速度を削らず、足りないときだけ加速)
+        float inwardSpeed = Vector2.Dot(rb.linearVelocity, dirToAnchor);
 
         bool underSpeedLimit =
             maxPullSpeed <= 0f || inwardSpeed < maxPullSpeed;
@@ -723,23 +608,17 @@ public class WireActionController : MonoBehaviour
                 Mathf.Max(0.01f, pullFalloffDistance)
             );
 
-            rb.AddForce(
-                dirToAnchor * pullAcceleration * falloff,
-                ForceMode.Acceleration
-            );
+            rb.linearVelocity +=
+                dirToAnchor * pullAcceleration * falloff * Time.fixedDeltaTime;
         }
 
-        // -------------------------------------------------
-        // 2. ロープの拘束
-        //    ロープより外へ出ようとする速度成分だけを消す。
-        //    横方向(接線)の速度は残るので、振り子のように勢いが続く。
-        // -------------------------------------------------
+        // 2. ロープの拘束(外へ出る速度成分だけを消す)
         if (distance > ropeLength)
         {
-            Vector3 outward = -dirToAnchor;
-            Vector3 velocity = rb.linearVelocity;
+            Vector2 outward = -dirToAnchor;
+            Vector2 velocity = rb.linearVelocity;
 
-            float outwardSpeed = Vector3.Dot(velocity, outward);
+            float outwardSpeed = Vector2.Dot(velocity, outward);
 
             if (outwardSpeed > 0f)
             {
@@ -771,9 +650,7 @@ public class WireActionController : MonoBehaviour
 
         if (isGasBoosting)
         {
-            currentGas -=
-                gasConsumptionRate * Time.deltaTime;
-
+            currentGas -= gasConsumptionRate * Time.deltaTime;
             currentGas = Mathf.Max(0f, currentGas);
 
             if (currentGas <= 0f)
@@ -783,9 +660,7 @@ public class WireActionController : MonoBehaviour
         }
         else
         {
-            currentGas +=
-                gasRecoveryRate * Time.deltaTime;
-
+            currentGas += gasRecoveryRate * Time.deltaTime;
             currentGas = Mathf.Min(maxGas, currentGas);
         }
 
@@ -800,33 +675,33 @@ public class WireActionController : MonoBehaviour
     }
 
     // =====================================================
-    // ガス噴射
+    // ガス噴射(マウスカーソル方向)
     // =====================================================
-
 
     private void ApplyGasBoost()
     {
-        // カメラが設定されていなければ何もしない
-        if (playerCamera == null)
+        if (!TryGetMouseWorldPoint(out Vector2 mouseWorld))
         {
             return;
         }
 
-        // カメラが向いている方向を取得
-        Vector3 boostDirection = playerCamera.transform.forward.normalized;
+        Vector2 boostDirection = mouseWorld - rb.position;
 
-        // 噴射方向の速度が上限未満のときだけ加速する。
-        // 上限を超えていても速度は削らない(急な減速を防ぐ)。
+        if (boostDirection.sqrMagnitude < 0.0001f)
+        {
+            return;
+        }
+
+        boostDirection.Normalize();
+
+        // 噴射方向の速度が上限未満のときだけ加速(超えていても削らない)
         float speedAlongBoost =
-            Vector3.Dot(rb.linearVelocity, boostDirection);
+            Vector2.Dot(rb.linearVelocity, boostDirection);
 
         if (maxGasBoostSpeed <= 0f || speedAlongBoost < maxGasBoostSpeed)
         {
-            // カメラの上下方向も含めてガス噴射する
-            rb.AddForce(
-                boostDirection * gasBoostForce,
-                ForceMode.Acceleration
-            );
+            rb.linearVelocity +=
+                boostDirection * gasBoostForce * Time.fixedDeltaTime;
         }
     }
 
@@ -869,21 +744,14 @@ public class WireActionController : MonoBehaviour
     // チェックポイント・復帰
     // =====================================================
 
-    /// <summary>
-    /// 復帰地点を更新する(Checkpointから呼ばれる)
-    /// </summary>
-    public void SetCheckpoint(Vector3 position, Quaternion rotation)
+    public void SetCheckpoint(Vector2 position, Quaternion rotation)
     {
         respawnPosition = position;
-        respawnRotation = rotation;
+        respawnRotationZ = rotation.eulerAngles.z;
     }
 
-    /// <summary>
-    /// 最後に通ったチェックポイントへ戻る(RespawnGroundから呼ばれる)
-    /// </summary>
     public void Respawn()
     {
-        // ワイヤーを即座に解除
         wireState = WireState.Idle;
 
         if (wireLine != null)
@@ -891,17 +759,18 @@ public class WireActionController : MonoBehaviour
             wireLine.enabled = false;
         }
 
-        // ガス噴射を停止
         isGasBoosting = false;
         StopGasEffect();
 
-        // 速度をリセットして移動
-        rb.linearVelocity = Vector3.zero;
-        rb.angularVelocity = Vector3.zero;
+        rb.linearVelocity = Vector2.zero;
+        rb.angularVelocity = 0f;
         rb.position = respawnPosition;
-        rb.rotation = respawnRotation;
-        transform.SetPositionAndRotation(respawnPosition, respawnRotation);
-        Physics.SyncTransforms();
+        rb.rotation = respawnRotationZ;
+        transform.SetPositionAndRotation(
+            new Vector3(respawnPosition.x, respawnPosition.y, transform.position.z),
+            Quaternion.Euler(0f, 0f, respawnRotationZ)
+        );
+        Physics2D.SyncTransforms();
 
         if (refillGasOnRespawn)
         {
@@ -913,68 +782,66 @@ public class WireActionController : MonoBehaviour
     // 外部から参照する関数
     // =====================================================
 
-    public float GetCurrentGas()
-    {
-        return currentGas;
-    }
-
-    public float GetMaxGas()
-    {
-        return maxGas;
-    }
-
-    public bool IsWireAttached()
-    {
-        return HasAttachedWire;
-    }
-
-    public bool IsGasBoosting()
-    {
-        return isGasBoosting;
-    }
+    public float GetCurrentGas() => currentGas;
+    public float GetMaxGas() => maxGas;
+    public bool IsWireAttached() => HasAttachedWire;
+    public bool IsGasBoosting() => isGasBoosting;
 
     // =====================================================
     // 地面判定
     // =====================================================
+
     private bool CheckGrounded()
     {
-        // プレイヤーのColliderを取得
-        Collider playerCollider = GetComponent<Collider>();
-
         if (playerCollider == null)
         {
-            Debug.LogWarning("PlayerにColliderがありません！");
+            Debug.LogWarning("PlayerにCollider2Dがありません！");
             return false;
         }
 
-        // Colliderの底面付近から下方向に判定
         Bounds bounds = playerCollider.bounds;
 
-        Vector3 origin = new Vector3(
+        Vector2 origin = new Vector2(
             bounds.center.x,
-            bounds.min.y + 0.05f,
-            bounds.center.z
+            bounds.min.y + 0.05f
         );
 
         float checkDistance = groundCheckDistance + 0.1f;
 
-        return Physics.Raycast(
+        int count = Physics2D.Raycast(
             origin,
-            Vector3.down,
-            checkDistance,
-            groundLayers,
-            QueryTriggerInteraction.Ignore
+            Vector2.down,
+            groundFilter,
+            hitBuffer,
+            checkDistance
         );
+
+        // 自分自身のColliderは除外(2Dは内側からのレイも当たるため)
+        for (int i = 0; i < count; i++)
+        {
+            Collider2D col = hitBuffer[i].collider;
+
+            if (col == playerCollider ||
+                col.transform.IsChildOf(transform))
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     // =====================================================
     // ジャンプ
     // =====================================================
+
     private void Jump()
     {
         if (rb == null) return;
 
-        Vector3 velocity = rb.linearVelocity;
+        Vector2 velocity = rb.linearVelocity;
 
         // 落下中の速度をリセット
         if (velocity.y < 0f)
@@ -982,14 +849,7 @@ public class WireActionController : MonoBehaviour
             velocity.y = 0f;
         }
 
+        velocity.y += jumpForce;
         rb.linearVelocity = velocity;
-
-        // ジャンプ
-        rb.AddForce(
-            Vector3.up * jumpForce,
-            ForceMode.VelocityChange
-        );
-
-        Debug.Log("ジャンプ！");
     }
 }
